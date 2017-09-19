@@ -1,7 +1,7 @@
 import cv2
 import numpy
 from ransac import H_from_ransac, convert_to_homogeneous_coord
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
 import math
 from matching_features import match_symmetric
 
@@ -32,7 +32,7 @@ def convert_affine_to_scale_rotation_trainlation_transform(tform):
 
 if __name__ == "__main__":
 
-    filename = '/home/thalles/Desktop/video-stabilization/input/shaky_car.avi'
+    filename = '../input/train.webm'
 
     last_frame, last_frame_kp, last_frame_descriptors = None, None, None
     corrected_mean, mov_mean = None, None
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             # Feed those pairs into cvFindHomography to compute the homography between those frames
             # H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 3.0)
 
-            corrected_frame = cv2.warpAffine(current_frame, Hcumulative[0:2, 0:3], (current_frame.T.shape)) # cv2.warpPerspective(current_frame, H, current_frame.T.shape)
+            corrected_frame = cv2.warpAffine(current_frame, H[0:2, 0:3], (current_frame.T.shape)) # cv2.warpPerspective(current_frame, H, current_frame.T.shape)
 
             cv2.imshow('frame', last_frame)
             cv2.imshow('corrected', corrected_frame)

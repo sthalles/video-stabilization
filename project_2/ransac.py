@@ -47,9 +47,9 @@ return best_fit
     best_err = numpy.inf
     best_inlier_idxs = None
     p = 0.99 # probability of success, i.e prob of one of the candidate inliers will be a correct set of points
-    e = 0.7 # proportion of outliers outliers
+    e = 0.6 # proportion of outliers outliers
     number_of_iterations = numpy.log(1-p)/numpy.log(1-(1-e)**s)
-    print("# of interations:", number_of_iterations)
+
     while iterations < int(number_of_iterations+1):
         # randomly select s points (or point pairs) to form a sample
         candidate_inliears_ids, test_idxs = random_partition(s, data.shape[0])
@@ -60,14 +60,10 @@ return best_fit
         maybemodel = fit_homography(candidate_inliears, s)
         test_err = get_error(test_points, maybemodel)
         also_idxs = test_idxs[test_err < t]  # select indices of rows with accepted points
-        alsoinliers = data[also_idxs, :]
-        print ('test_err.min()', test_err.min())
-        print ('test_err.max()', test_err.max())
-        print ('numpy.mean(test_err)', numpy.mean(test_err))
-        print ('iteration %d:len(alsoinliers) = %d' % (
-            iterations, len(alsoinliers)))
-        if len(alsoinliers) > d:
-            betterdata = numpy.concatenate((candidate_inliears, alsoinliers))
+        also_inliers = data[also_idxs, :]
+
+        if len(also_inliers) > d:
+            betterdata = numpy.concatenate((candidate_inliears, also_inliers))
             bettermodel = fit_homography(betterdata, s)
             better_errs = get_error(betterdata, bettermodel)
             thiserr = numpy.mean(better_errs)
@@ -77,7 +73,7 @@ return best_fit
                 best_inlier_idxs = numpy.concatenate((candidate_inliears_ids, also_idxs))
         iterations += 1
     if best_fit is None:
-        raise ValueError("did not meet fit acceptance criteria")
+        raise ValueError("Unable to get a best fit model")
     else:
         return best_fit, {'inliers': best_inlier_idxs}
 
@@ -89,78 +85,84 @@ def normalize(points):
         row /= points[-1]
     return points
 
+"""
+This routine was based on the notes from the book ProgrammingComputerVision
+Fit the homography to the corresponding points
+"""
+def fit_homography(data_points, s):
 
-def fit_homography(data, s):
-    """ Fit homography to four selected correspondences. """
-    # transpose to fit H
-    data = data.T
+    data_points = data_points.T
 
-    # from points
-    fp = data[:3, :s]
-
-    # target points
-    tp = data[3:, :s]
+    # from/to points
+    from_points, to_points = data_points[:3, :s], data_points[3:, :s]
 
     # fit homography and return
-    return Haffine_from_points(fp, tp)
+    return get_affine_transform(from_points, to_points)
 
-def get_error(data, H):
-    """ Apply homography to all correspondences,
-        return error for each transformed point. """
+def get_error(data_points, H):
 
-    data = data.T
+    data_points = data_points.T
 
-    # from points
-    fp = data[:3]
-    # target points
-    tp = data[3:]
+    # from/to points
+    from_points,to_points = data_points[:3], data_points[3:]
 
     # transform fp
-    fp_transformed = numpy.dot(H, fp)
+    fp_transformed = numpy.dot(H, from_points)
 
     # normalize hom. coordinates
     fp_transformed = normalize(fp_transformed)
 
     # return error per point
-    return numpy.sqrt(numpy.sum((tp - fp_transformed) ** 2, axis=0))
+    return numpy.sqrt(numpy.sum((to_points - fp_transformed) ** 2, axis=0))
 
 
-def Haffine_from_points(fp, tp):
-    """ Find H, affine transformation, such that
-        tp is affine transf of fp. """
+"""
+The following routine was based in the notes from the book ProgrammingComputerVision.
+That is the implementation os the Gold Standard Algorithm for finding affine transforms described in
+Multiple View Geometry in Computer Vision (Second Edition) p 130.
+"""
+def get_affine_transform(fp, tp):
+    ## The points are conditioned by normalizing so that they have zero mean and unit
+    ## standard deviation. This is very important for numerical reasons since the stability
+    ## of the algorithm is dependent of the coordinate representation
 
-    if fp.shape != tp.shape:
-        raise RuntimeError('number of points do not match')
-
-    # condition points
     # --from points--
     m = numpy.mean(fp[:2], axis=1)
-    maxstd = max(numpy.std(fp[:2], axis=1)) + 1e-9
-    C1 = numpy.diag([1 / maxstd, 1 / maxstd, 1])
-    C1[0][2] = -m[0] / maxstd
-    C1[1][2] = -m[1] / maxstd
+    max_std = max(numpy.std(fp[:2], axis=1)) + 1e-9
+    C1 = numpy.diag([1 / max_std, 1 / max_std, 1])
+    C1[0][2] = -m[0] / max_std
+    C1[1][2] = -m[1] / max_std
     fp_cond = numpy.dot(C1, fp)
 
     # --to points--
     m = numpy.mean(tp[:2], axis=1)
     C2 = C1.copy()  # must use same scaling for both point sets
-    C2[0][2] = -m[0] / maxstd
-    C2[1][2] = -m[1] / maxstd
+    C2[0][2] = -m[0] / max_std
+    C2[1][2] = -m[1] / max_std
     tp_cond = numpy.dot(C2, tp)
 
     # conditioned points have mean zero, so translation is zero
+    # Form the n × 4 matrix A whose rows are the vectors
+    # XTi = (xTi , x'iT)=(xi, yi, x'i, y'i).
     A = numpy.concatenate((fp_cond[:2], tp_cond[:2]), axis=0)
     U, S, V = numpy.linalg.svd(A.T)
 
     # create B and C matrices as Hartley-Zisserman (2:nd ed) p 130.
-    tmp = V[:2].T
-    B = tmp[:2]
-    C = tmp[2:4]
+    V_T = V[:2].T
 
-    tmp2 = numpy.concatenate((numpy.dot(C, numpy.linalg.pinv(B)), numpy.zeros((2, 1))), axis=1)
-    H = numpy.vstack((tmp2, [0, 0, 1]))
+    # Let V1 and V2 be the right singular-vectors of A corresponding to the two largest (sic) singular values
+    V1 = V_T[:2]
+    V2 = V_T[2:4]
+    B = V1
+    C = V2
 
-    # decondition
+    # Let H2×2 = CB−1, where B and C are the 2 × 2 blocks
+    H22 = numpy.concatenate((numpy.dot(C, numpy.linalg.pinv(B)), numpy.zeros((2, 1))), axis=1)
+
+    #  The required homography is
+    H = numpy.vstack((H22, [0, 0, 1]))
+
+    # and the corresponding estimate of the image points is given by
     H = numpy.dot(numpy.linalg.inv(C2), numpy.dot(H, C1))
 
     return H / H[2, 2]
@@ -170,7 +172,7 @@ def random_partition(s, number_of_points):
     all_idxs = numpy.arange(number_of_points)
     numpy.random.shuffle(all_idxs)
 
-    # first get the minimum set necessary data points, 4 in the case of homography
+    # first get the minimum set necessary data points, 3 in the case of affine transform
     minimum_set_datapoints = all_idxs[:s]
 
     # select the other points
@@ -179,12 +181,6 @@ def random_partition(s, number_of_points):
 
 
 def H_from_ransac(fp, tp, match_theshold=10):
-    """ Robust estimation of homography H from point
-        correspondences using RANSAC (ransac.py from
-        http://www.scipy.org/Cookbook/RANSAC).
-
-        input: fp,tp (3*n arrays) points in hom. coordinates. """
-
     # group corresponding points
     data = numpy.concatenate((fp, tp), axis=1)
 
