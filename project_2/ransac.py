@@ -59,8 +59,8 @@ return best_fit
         # instantiate the model (homography)
         maybemodel = fit_homography(candidate_inliears, s)
         test_err = get_error(test_points, maybemodel)
-        also_idxs = test_idxs[test_err < t]  # select indices of rows with accepted points
-        also_inliers = data[also_idxs, :]
+        also_inliers_idxs = test_idxs[test_err < t]  # select indices of rows with accepted points
+        also_inliers = data[also_inliers_idxs, :]
 
         if len(also_inliers) > d:
             betterdata = numpy.concatenate((candidate_inliears, also_inliers))
@@ -70,7 +70,7 @@ return best_fit
             if thiserr < best_err:
                 best_fit = bettermodel
                 best_err = thiserr
-                best_inlier_idxs = numpy.concatenate((candidate_inliears_ids, also_idxs))
+                best_inlier_idxs = numpy.concatenate((candidate_inliears_ids, also_inliers_idxs))
         iterations += 1
     if best_fit is None:
         raise ValueError("Unable to get a best fit model")
